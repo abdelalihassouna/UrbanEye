@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Draw ROI</title>
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <link href="styles.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-12 center">
+                <h1>Upload Video and Draw ROI</h1>
+            </div>
+        </div>
+        <div class="row mt-3">
+            <div class="col-md-12 center">
+                <input type="file" id="videoFile" class="btn btn-light">
+                <button onclick="uploadVideo()" class="btn btn-primary ml-2">Upload</button>
+            </div>
+        </div>
+        <div class="row mt-3">
+            <div class="col-md-12 center">
+                <canvas id="frameCanvas"></canvas>
+            </div>
+        </div>
+        <div class="row mt-3">
+            <div class="col-md-12 center">
+                <input type="text" id="polyName" class="form-control" placeholder="Polyline Name" style="width: 300px; display:inline-block;">
+                <button onclick="createNewPoly()" class="btn btn-success ml-2">Create New Polyline</button>
+                <select id="polyDropdown"></select>
+                <button onclick="deletePoly()" class="btn btn-danger ml-2">Delete Selected Polyline</button>
+                <button onclick="submitROI()" class="btn btn-info ml-2">Submit ROI</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let polylines = {};
+        let selectedPoly = null;
+        let canvas;
+        let ctx;
+        let originalImage = null;
+
+        function uploadVideo() {
+            const fileInput = document.getElementById('videoFile');
+            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            }).then(response => response.json()).then(data => {
+                canvas = document.getElementById('frameCanvas');
+                ctx = canvas.getContext('2d');
+                
+                const img = new Image();
+                img.src = 'data:image/jpeg;base64,' + data.frame;
+                img.onload = function() {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0, img.width, img.height);
+                    originalImage = ctx.getImageData(0, 0, img.width, img.height);
+                };
+
+                canvas.onclick = function(event) {
+                    if (selectedPoly) {
+                        const x = event.offsetX;
+                        const y = event.offsetY;
+                        polylines[selectedPoly].push({x, y});
+                        drawPolylines();
+                    }
+                };
+            });
+        }
+
+        function drawPolylines() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (originalImage) {
+                ctx.putImageData(originalImage, 0, 0);
+            }
+
+            for (const [name, points] of Object.entries(polylines)) {
+                if (points.length === 0) continue;
+                ctx.beginPath();
+                ctx.moveTo(points[0].x, points[0].y);
+                for (let i = 1; i < points.length; i++) {
+                    ctx.lineTo(points[i].x, points[i].y);
+                }
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                console.log("Canvas clicked:", x, y);
+
+            }
+            
+        }
+
+        let dropdown;
+
+        function populateDropdown() {
+            dropdown.innerHTML = '';
+            for (const name in polylines) {
+                const option = document.createElement('option');
+                option.value = name;
+                option.text = name;
+                dropdown.add(option);
+            }
+        }
+
+        function createNewPoly() {
+            const name = document.getElementById('polyName').value;
+            if (name) {
+                polylines[name] = [];
+                selectedPoly = name;
+                populateDropdown();
+                drawPolylines();
+            }
+        }
+
+        function deletePoly() {
+            const selected = dropdown.value;
+            if (selected) {
+                if (window.confirm(`Are you sure you want to delete polyline ${selected}?`)) {
+                    delete polylines[selected];
+                    populateDropdown();
+                    drawPolylines();
+                }
+            }
+        }
+
+        window.onload = function() {
+            dropdown = document.getElementById('polyDropdown');
+            populateDropdown();
+        };
+
+        function submitROI() {
+            // Send all polylines to the backend
+            fetch('/set_roi', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({polylines})
+            }).then(response => response.json()).then(data => {
+                console.log(data.message);
+        
+                // Remove canvas
+                const canvas = document.getElementById('frameCanvas');
+                canvas.remove();
+        
+                // Add video feed
+                const videoFeed = document.createElement('img');
+                videoFeed.id = 'videoFeed';
+                videoFeed.src = '/video_feed';
+                document.body.appendChild(videoFeed);
+            });
+        }
+        
+    </script>
+</body>
+</html>
